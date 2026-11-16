@@ -221,15 +221,12 @@ LEFT JOIN purchase_sessions AS p
 
 These eight queries demonstrate core GoogleSQL patterns used to explore GA4 export data: bounded date filters, event and user aggregations, nested parameter extraction, CTEs, and session-level joins. The analysis distinguishes event counts, pseudonymous users, and reconstructed sessions to avoid conflating different metrics. Before interpreting findings, each query should be run in BigQuery and checked for valid outputs and sample-data limitations.
 
-# References
+# Appendix
 
--   Google for Developers. [BigQuery sample dataset for Google Analytics ecommerce web implementation](https://developers.google.com/analytics/bigquery/web-ecommerce-demo-dataset).
--   Google for Developers. [Advanced queries](https://developers.google.com/analytics/bigquery/advanced-queries?hl=en).
--   Google Analytics Help. [Sample queries for audiences based on BigQuery data](https://support.google.com/analytics/answer/9037342?hl=en).
+### GitHub Repository
 
-# Appendix — GitHub Publication Links
+[GitHub Repository](https://github.com/WillySuu/GA4-4---SQL-Pack)
 
--   **GitHub Repository:** \[Add the repository URL after publishing\]
--   **GitHub Pages Report:** \[Add the live Pages URL after publishing\]
+### Published HTML Page
 
-**Validation status:** SQL examples prepared; BigQuery execution and output verification pending. Replace this statement only after testing all eight queries.
+[Published HTML Page](https://willysuu.github.io/GA4-4---SQL-Pack/)
