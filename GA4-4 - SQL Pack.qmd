@@ -1,0 +1,235 @@
+---
+title: "GA4-4: SQL Pack"
+subtitle: "Eight GoogleSQL Queries for GA4 Ecommerce Event Data"
+author: "Willy Su"
+date: "2026-11-15"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-copy: true
+    theme: cosmo
+    number-sections: true
+execute:
+  eval: false
+---
+
+# Query 1 — Events on Selected Dates
+
+**Skills:** Filtering and scoping (`WHERE`, `_TABLE_SUFFIX`).
+
+``` sql
+SELECT
+  event_date,
+  event_name,
+  user_pseudo_id
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210107'
+  AND event_name IN ('page_view', 'session_start')
+LIMIT 100;
+```
+
+**Interpretation:** This query retrieves a sample of page-view and session-start events from the first week of January 2021. Each row represents one event, rather than one user or session. It is useful for inspecting the structure of relevant traffic events before building summary metrics. The `LIMIT` reduces returned rows but does not replace the date filter for scan efficiency.
+
+# Query 2 — Purchase Events in a Date Window
+
+**Skills:** Filtering and scoping (`WHERE`).
+
+``` sql
+SELECT
+  event_date,
+  user_pseudo_id,
+  ecommerce.transaction_id AS transaction_id,
+  ecommerce.purchase_revenue_in_usd AS purchase_revenue_usd
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+WHERE _TABLE_SUFFIX BETWEEN '20201201' AND '20201231'
+  AND event_name = 'purchase'
+ORDER BY event_date
+LIMIT 100;
+```
+
+**Interpretation:** This query isolates purchase events recorded during December 2020 and displays transaction and revenue fields where available. Each row is a purchase event and should not automatically be interpreted as a unique transaction. It is useful for inspecting ecommerce tracking and identifying missing transaction values. Because the sample data is obfuscated, monetary fields may be incomplete or inconsistent.
+
+# Query 3 — Event Frequency by Type
+
+**Skills:** Grouping and aggregation (`GROUP BY`, `COUNT(*)`, `COUNT(DISTINCT)`).
+
+``` sql
+SELECT
+  event_name,
+  COUNT(*) AS event_count,
+  COUNT(DISTINCT user_pseudo_id) AS distinct_pseudo_users
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210131'
+GROUP BY event_name
+ORDER BY event_count DESC;
+```
+
+**Interpretation:** This query counts recorded events and distinct pseudonymous user identifiers for each event name in January 2021. Event counts measure activity volume, while distinct identifiers approximate users observed for each event type. This is useful for comparing the relative frequency of browsing and ecommerce behaviors. A pseudonymous identifier is not necessarily a unique person.
+
+# Query 4 — Daily Page Views and Users
+
+**Skills:** Grouping and aggregation (`GROUP BY`, `COUNT(*)`, `COUNT(DISTINCT)`).
+
+``` sql
+SELECT
+  PARSE_DATE('%Y%m%d', event_date) AS activity_date,
+  COUNT(*) AS page_view_events,
+  COUNT(DISTINCT user_pseudo_id) AS page_view_pseudo_users
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210114'
+  AND event_name = 'page_view'
+GROUP BY activity_date
+ORDER BY activity_date;
+```
+
+**Interpretation:** This query summarizes daily page-view events and distinct pseudonymous identifiers that generated them. It is useful for identifying traffic fluctuations over a two-week period. The user count is restricted to people with page-view events and is not the official GA4 Active Users metric. Multiple page views from the same identifier count separately as events.
+
+# Query 5 — Most Viewed Page URLs
+
+**Skills:** `UNNEST(event_params)`, key matching, string value extraction, aggregation.
+
+``` sql
+SELECT
+  (SELECT ep.value.string_value
+   FROM UNNEST(event_params) AS ep
+   WHERE ep.key = 'page_location') AS page_url,
+  COUNT(*) AS page_view_events
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210131'
+  AND event_name = 'page_view'
+GROUP BY page_url
+HAVING page_url IS NOT NULL
+ORDER BY page_view_events DESC
+LIMIT 20;
+```
+
+**Interpretation:** This query extracts the `page_location` string parameter from nested GA4 event parameters and ranks URLs by page-view event count. It helps identify frequently visited pages for content or navigation analysis. URLs may contain query strings that split otherwise identical pages into separate rows. Missing page locations are excluded from the ranking.
+
+# Query 6 — Engagement Time by Event Type
+
+**Skills:** `UNNEST(event_params)`, integer value extraction, aggregation.
+
+``` sql
+SELECT
+  event_name,
+  COUNT(*) AS events_with_engagement_parameter,
+  ROUND(SUM(ep.value.int_value) / 1000.0, 2) AS engagement_seconds
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*` AS e
+CROSS JOIN UNNEST(e.event_params) AS ep
+WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210131'
+  AND ep.key = 'engagement_time_msec'
+  AND ep.value.int_value IS NOT NULL
+GROUP BY event_name
+ORDER BY engagement_seconds DESC;
+```
+
+**Interpretation:** This query extracts the integer `engagement_time_msec` parameter and converts summed milliseconds into seconds by event type. It is useful for exploring where measured engagement time is attributed across GA4 events. Only events carrying a non-null engagement parameter are included. Engagement time is not equivalent to total elapsed session duration.
+
+# Query 7 — Daily Ecommerce Funnel Events
+
+**Skills:** CTE (`WITH`), conditional aggregation, grouping.
+
+``` sql
+WITH funnel_events AS (
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS activity_date,
+    event_name,
+    user_pseudo_id
+  FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210131'
+    AND event_name IN ('view_item', 'add_to_cart', 'begin_checkout', 'purchase')
+)
+SELECT
+  activity_date,
+  COUNTIF(event_name = 'view_item') AS view_item_events,
+  COUNTIF(event_name = 'add_to_cart') AS add_to_cart_events,
+  COUNTIF(event_name = 'begin_checkout') AS begin_checkout_events,
+  COUNTIF(event_name = 'purchase') AS purchase_events
+FROM funnel_events
+GROUP BY activity_date
+ORDER BY activity_date;
+```
+
+**Interpretation:** The CTE first restricts the data to four ecommerce event types, and the final query counts each type by day. It is useful for comparing volumes at different shopping stages and spotting tracking anomalies. These are event counts, not unique users or sequentially verified funnel conversions. Users may perform stages on different days or repeat an event.
+
+# Query 8 — Sessions with Page Views and Purchases
+
+**Skills:** Multiple CTEs, `UNNEST(event_params)`, `LEFT JOIN`, grouping and aggregation.
+
+``` sql
+WITH session_events AS (
+  SELECT
+    user_pseudo_id,
+    (SELECT ep.value.int_value
+     FROM UNNEST(event_params) AS ep
+     WHERE ep.key = 'ga_session_id') AS ga_session_id,
+    event_name
+  FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN '20210101' AND '20210131'
+    AND event_name IN ('page_view', 'purchase')
+),
+page_sessions AS (
+  SELECT
+    user_pseudo_id,
+    ga_session_id,
+    COUNT(*) AS page_view_events
+  FROM session_events
+  WHERE event_name = 'page_view'
+    AND user_pseudo_id IS NOT NULL
+    AND ga_session_id IS NOT NULL
+  GROUP BY user_pseudo_id, ga_session_id
+),
+purchase_sessions AS (
+  SELECT
+    user_pseudo_id,
+    ga_session_id,
+    COUNT(*) AS purchase_events
+  FROM session_events
+  WHERE event_name = 'purchase'
+    AND user_pseudo_id IS NOT NULL
+    AND ga_session_id IS NOT NULL
+  GROUP BY user_pseudo_id, ga_session_id
+)
+SELECT
+  COUNT(*) AS sessions_with_page_views,
+  COUNTIF(p.purchase_events IS NOT NULL) AS sessions_with_page_views_and_purchases,
+  SUM(v.page_view_events) AS page_view_events,
+  COALESCE(SUM(p.purchase_events), 0) AS purchase_events_in_matched_sessions,
+  ROUND(100 * SAFE_DIVIDE(
+    COUNTIF(p.purchase_events IS NOT NULL), COUNT(*)), 2) AS matched_session_purchase_pct
+FROM page_sessions AS v
+LEFT JOIN purchase_sessions AS p
+  ON v.user_pseudo_id = p.user_pseudo_id
+ AND v.ga_session_id = p.ga_session_id;
+```
+
+**Interpretation:** This query extracts the integer GA4 session ID, aggregates page views and purchases by the composite key of pseudonymous user ID and session ID, then joins the two session summaries. It estimates the share of page-view sessions that also contain a purchase event during January 2021. It is useful for analyzing shopping activity at a session level rather than simply comparing event totals. Sessions without a page view or a usable session ID are excluded, so this is not an official GA4 session conversion rate.
+
+# Skill Coverage Checklist
+
+| Required skill                        | Queries demonstrating it |
+|---------------------------------------|--------------------------|
+| Filtering and scoping (at least 2)    | 1, 2, 3, 4, 5, 6, 7, 8   |
+| Grouping and aggregation (at least 2) | 3, 4, 5, 6, 7, 8         |
+| UNNEST event parameters (at least 2)  | 5, 6, 8                  |
+| CTE / modular structure (at least 1)  | 7, 8                     |
+| Joining or combining (at least 1)     | 8                        |
+| Interpretation (all 8)                | 1–8                      |
+
+# Conclusion
+
+These eight queries demonstrate core GoogleSQL patterns used to explore GA4 export data: bounded date filters, event and user aggregations, nested parameter extraction, CTEs, and session-level joins. The analysis distinguishes event counts, pseudonymous users, and reconstructed sessions to avoid conflating different metrics. Before interpreting findings, each query should be run in BigQuery and checked for valid outputs and sample-data limitations.
+
+# References
+
+-   Google for Developers. [BigQuery sample dataset for Google Analytics ecommerce web implementation](https://developers.google.com/analytics/bigquery/web-ecommerce-demo-dataset).
+-   Google for Developers. [Advanced queries](https://developers.google.com/analytics/bigquery/advanced-queries?hl=en).
+-   Google Analytics Help. [Sample queries for audiences based on BigQuery data](https://support.google.com/analytics/answer/9037342?hl=en).
+
+# Appendix — GitHub Publication Links
+
+-   **GitHub Repository:** \[Add the repository URL after publishing\]
+-   **GitHub Pages Report:** \[Add the live Pages URL after publishing\]
+
+**Validation status:** SQL examples prepared; BigQuery execution and output verification pending. Replace this statement only after testing all eight queries.
